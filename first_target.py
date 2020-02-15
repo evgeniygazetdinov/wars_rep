@@ -1,4 +1,5 @@
 import os
+from os import path
 import psutil
 
 def find_aviliable_devices():
@@ -17,8 +18,9 @@ def write_devices_into_file(devices):
     f.close()
     return os.path.abspath(name)
 
-def read_file_with_information():
-    pass
+def read_file_with_information(file_with_information):
+    with open(file_with_information, 'r') as myfile:
+          data = myfile.read()
 
 def find_type():
     pass
@@ -29,17 +31,20 @@ def find_space():
 def find_etc():
     pass
 
-def find_info_about_device():
-    type = find_type()
-    space = find_space()
-    etc = find_etc()
+def find_info_about_device(file_with_information):
+    info = read_file_with_information(file_with_information)
+    type = find_type(info)
+    space = find_space(info)
+    etc = find_etc(info)
 
     return type, space, etc
 
 
-def find_information_about_devices():
-    devices = find_aviliable_devices()
-    file_with_information = write_devices_into_file(devices)
+def find_information_about_devices(file = 'file.txt'):
+    if not path.exists(file):
+        devices = find_aviliable_devices()
+        file_with_information = write_devices_into_file(devices)
+
 #    type, space, etc = find_info_about_device(file_with_information)
 #    print(type, space, etc)
 
