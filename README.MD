@@ -1,0 +1,1 @@
+examples from code wars for educate golang
