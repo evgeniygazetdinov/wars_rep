@@ -1,7 +1,11 @@
 package main
 
-import "wars_rep/lib"
+import (
+	"fmt"
+	"wars_rep/lib"
+)
 
 func main() {
-	lib.Solution("xaxaxas")
+	// lib.Solution("xaxaxas")
+	fmt.Println(lib.RemoveAllVolves("This website is for losers LOL!"))
 }
