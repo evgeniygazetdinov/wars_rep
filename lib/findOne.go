@@ -5,20 +5,20 @@ import (
 )
 
 func findOdd(seq []int) int {
-	smallestNumber := 90
+	smallestNumber := 0
 	myMap := make(map[int]int)
 	for _, x := range seq {
-		for k, v := range myMap {
-			if v == smallestNumber {
-
-			}
-		}
-		fmt.Println(x)
+		myMap[x]++
 	}
-	fmt.Println(myMap)
-	for k, v := range myMap {
-		if v > smallestNumber {
-			smallestNumber = k
+	//extract values from map
+	// res := make([]int, 0, len(myMap))
+	// for _, v := range myMap {
+	// 	res = append(res, v)
+	// }
+	// return res
+	for key, value := range myMap {
+		if value == 1 {
+			smallestNumber = key
 		}
 	}
 	return smallestNumber
