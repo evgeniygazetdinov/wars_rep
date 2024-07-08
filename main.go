@@ -6,6 +6,7 @@ import (
 
 func main() {
 
-	lib.HandlePushButton()
+	// lib.HandlePushButton()
+	fmt.Println(lib.SumOfSeq(1, 5, 1))
 
 }
