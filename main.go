@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"wars_rep/lib"
 )
 
