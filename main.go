@@ -6,7 +6,6 @@ import (
 
 func main() {
 
-	// lib.HandlePushButton()
 	// fmt.Println(lib.SumOfSeq(1, 5, 1))
 	fmt.Println(lib.Divisor(4))
 
