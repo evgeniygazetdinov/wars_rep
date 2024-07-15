@@ -7,8 +7,7 @@ import (
 
 func main() {
 
-	// lib.HandlePushButton()
-	fmt.Println(lib.ReverseParentheses("(abcd)"))
+	lib.ReverseParentheses("(u(love)i)")
 
 
 }
