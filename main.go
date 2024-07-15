@@ -6,7 +6,6 @@ import (
 
 func main() {
 
-	// lib.HandlePushButton()
 	lib.ReverseParentheses("(u(love)i)")
 
 }
