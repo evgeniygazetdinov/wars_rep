@@ -1,6 +1,7 @@
 package lib
 
 import (
+
 	"fmt"
 	"slices"
 )
@@ -58,19 +59,8 @@ func mySplit3(s string) []string {
 	return arr
 }
 
-func split2(s string) string {
-	var res string
-	listExeptions := []string{"(", ")"}
-	for i := 0; i < len(s); i++ {
-		curWord := string(s[i])
-		withoutCurses := slices.Contains(listExeptions, curWord)
-		if !withoutCurses {
-			res = res + curWord
-		}
-	}
-	return Reverse(res)
-}
 
 func ReverseParentheses(s string) {
 	fmt.Println(mySplit(s))
+
 }
