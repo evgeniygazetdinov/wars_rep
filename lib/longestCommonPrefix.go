@@ -24,7 +24,6 @@ func LongerCommonPrefix(myArr []string) string {
 				}
 			}
 
-		}
 	}
 	return ""
 }
