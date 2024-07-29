@@ -27,8 +27,9 @@ func LongerCommonPrefix(myArr []string) string {
 				}
 			}
 
+			continue
+
 		}
-		continue
 	}
 	if len(resultArr) > 0 {
 		return slices.Max(resultArr)
@@ -36,4 +37,5 @@ func LongerCommonPrefix(myArr []string) string {
 		return ""
 	}
 	// переделать на сравнение первого с последнего и с конца
+
 }
