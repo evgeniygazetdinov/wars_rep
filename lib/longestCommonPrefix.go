@@ -3,7 +3,7 @@ package lib
 import "slices"
 
 func LongerCommonPrefix(myArr []string) string {
-	resultArr := []string{}
+resultArr := []string{}
 	longerPrefix := ""
 	wordsCounter := 0
 	for i := 0; i < len(myArr); i++ {
