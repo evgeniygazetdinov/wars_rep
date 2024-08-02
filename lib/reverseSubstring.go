@@ -61,14 +61,11 @@ func makeCut(str3 string) []string {
 
 func mySplit3(s string) string {
 	stringForReverse := ""
-	beginSym := constantArray()[0]
-	for _, w := range s {
-		// isExeception := slices.Contains(constantArray(), string(w))
-		if string(w) == beginSym {
-			//отщипнуть строку
-			cutedWord := makeCut(s)[0]
-			stringForReverse = mySplit3(cutedWord)
-			// как пропускать внутрению подстроку
+	for x := range s {
+		if x == "(" {
+
+		} else if x == ")" {
+
 		}
 	}
 	return stringForReverse
