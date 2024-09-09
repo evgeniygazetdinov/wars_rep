@@ -61,13 +61,6 @@ func makeCut(str3 string) []string {
 
 func mySplit3(s string) string {
 	stringForReverse := ""
-	for x := range s {
-		if x == "(" {
-
-		} else if x == ")" {
-
-		}
-	}
 	return stringForReverse
 }
 
