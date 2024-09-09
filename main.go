@@ -1,9 +1,6 @@
 package main
 
-import (
-	"fmt"
-	"wars_rep/lib"
-)
+import "wars_rep/lib"
 
 func makeSliceOfSlices(length int) [][]int {
 
