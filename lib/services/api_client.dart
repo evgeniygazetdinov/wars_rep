@@ -109,6 +109,34 @@ class ApiClient {
     return (accessToken: accessToken!, user: user);
   }
 
+  Future<({String accessToken, ChatUser user})> loginPassword({
+    required String email,
+    required String password,
+  }) async {
+    final data = await postJson('/auth/login', body: {
+      'email': email.trim(),
+      'password': password,
+    });
+    accessToken = data['access_token'] as String;
+    final user = ChatUser.fromJson(data['user'] as Map<String, dynamic>);
+    return (accessToken: accessToken!, user: user);
+  }
+
+  Future<({String accessToken, ChatUser user})> register({
+    required String email,
+    required String password,
+    required String username,
+  }) async {
+    final data = await postJson('/auth/register', body: {
+      'email': email.trim(),
+      'password': password,
+      'username': username.trim(),
+    });
+    accessToken = data['access_token'] as String;
+    final user = ChatUser.fromJson(data['user'] as Map<String, dynamic>);
+    return (accessToken: accessToken!, user: user);
+  }
+
   Future<({String accessToken, ChatUser user})> loginOAuth({
     required String provider,
     required String accessToken,
@@ -204,20 +232,39 @@ class ApiClient {
 
   Future<ChatMessage> sendMessage({
     required int chatId,
-    required String userUid,
     required String text,
   }) async {
     final data = await postJson('/private_chat/$chatId/message', body: {
-      'user_id': userUid,
       'text': text,
     });
     final raw = Map<String, dynamic>.from(
       data['new_message'] as Map? ?? <String, dynamic>{},
     );
     raw.putIfAbsent('chat_id', () => chatId);
-    raw.putIfAbsent('user_uid', () => userUid);
     raw.putIfAbsent('text', () => text);
     return ChatMessage.fromJson(raw);
+  }
+
+  Future<bool> deleteMessage({
+    required int chatId,
+    required int messageId,
+  }) async {
+    final response = await _client.delete(
+      _uri('/private_chat/$chatId/$messageId'),
+      headers: _headers(),
+    );
+    if (response.statusCode == 200) return true;
+    _throwFor(response);
+  }
+
+  Future<void> deleteChat(int chatId) async {
+    final response = await _client.delete(
+      _uri('/private_chat/$chatId'),
+      headers: _headers(),
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      _throwFor(response);
+    }
   }
 
   Future<bool> healthCheck() async {

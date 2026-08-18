@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../l10n/app_locale_scope.dart';
 import '../models/emoji_catalog.dart';
 import '../theme/apple_theme.dart';
 
@@ -24,9 +25,9 @@ class EmojiStickerPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final items = tab == EmojiPanelTab.emoji
-        ? EmojiCatalog.emojis
-        : EmojiCatalog.stickers;
+    final s = AppLocaleScope.of(context).strings;
+    final items =
+        tab == EmojiPanelTab.emoji ? EmojiCatalog.emojis : EmojiCatalog.stickers;
     final isSticker = tab == EmojiPanelTab.stickers;
 
     return Material(
@@ -41,13 +42,13 @@ class EmojiStickerPanel extends StatelessWidget {
               child: Row(
                 children: [
                   _TabChip(
-                    label: 'Смайлы',
+                    label: s.emojisTab,
                     selected: tab == EmojiPanelTab.emoji,
                     onTap: () => onTabChanged(EmojiPanelTab.emoji),
                   ),
                   const SizedBox(width: 8),
                   _TabChip(
-                    label: 'Стикеры',
+                    label: s.stickersTab,
                     selected: tab == EmojiPanelTab.stickers,
                     onTap: () => onTabChanged(EmojiPanelTab.stickers),
                   ),

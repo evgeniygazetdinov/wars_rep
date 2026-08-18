@@ -64,6 +64,27 @@ class SessionController extends ChangeNotifier {
     await applyAuth(accessToken: result.accessToken, user: result.user);
   }
 
+  Future<void> loginPassword({
+    required String email,
+    required String password,
+  }) async {
+    final result = await _api.loginPassword(email: email, password: password);
+    await applyAuth(accessToken: result.accessToken, user: result.user);
+  }
+
+  Future<void> register({
+    required String email,
+    required String password,
+    required String username,
+  }) async {
+    final result = await _api.register(
+      email: email,
+      password: password,
+      username: username,
+    );
+    await applyAuth(accessToken: result.accessToken, user: result.user);
+  }
+
   Future<void> loginOAuth({
     required String provider,
     required String providerAccessToken,

@@ -4,14 +4,16 @@ import 'package:flutter/material.dart';
 import '../config/api_config.dart';
 import '../l10n/app_locale_scope.dart';
 import '../models/chat_models.dart';
-import '../models/emoji_catalog.dart';
 import '../services/api_client.dart';
 import '../services/session_controller.dart';
 import '../theme/apple_theme.dart';
+import '../utils/message_preview.dart';
+import '../utils/time_format.dart';
 import '../widgets/apple_navigation.dart';
 import '../widgets/language_switch_button.dart';
+import '../widgets/user_avatar.dart';
 import 'chat_screen.dart';
-import 'login_screen.dart';
+import 'profile_screen.dart';
 import 'search_users_screen.dart';
 
 class ChatsScreen extends StatefulWidget {
@@ -63,13 +65,41 @@ class _ChatsScreenState extends State<ChatsScreen> {
     }
   }
 
-  Future<void> _logout() async {
-    await widget.session.logout();
-    if (!mounted) return;
-    Navigator.of(context).pushAndRemoveUntil(
-      applePageRoute(LoginScreen(session: widget.session)),
-      (_) => false,
+  Future<bool> _confirmDelete(ChatSummary chat) async {
+    final s = AppLocaleScope.of(context).strings;
+    final peer = chat.peer;
+    final name = peer?.username ?? s.chatFallbackTitle(chat.id);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(s.deleteChatTitle),
+        content: Text(s.deleteChatBody(name)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(s.cancel),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppleTheme.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(s.delete),
+          ),
+        ],
+      ),
     );
+    if (confirmed != true) return false;
+
+    try {
+      await widget.session.api.deleteChat(chat.id);
+      return true;
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.message)),
+        );
+      }
+      return false;
+    }
   }
 
   @override
@@ -94,9 +124,13 @@ class _ChatsScreenState extends State<ChatsScreen> {
             icon: const Icon(CupertinoIcons.search),
           ),
           IconButton(
-            tooltip: s.logout,
-            onPressed: _logout,
-            icon: const Icon(CupertinoIcons.square_arrow_right),
+            tooltip: s.profileTitle,
+            onPressed: () {
+              Navigator.of(context).push(
+                applePageRoute(ProfileScreen(session: widget.session)),
+              );
+            },
+            icon: UserAvatar(user: me, radius: 14),
           ),
         ],
       ),
@@ -134,7 +168,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
                         style: const TextStyle(color: AppleTheme.secondaryLabel),
                       ),
                       const SizedBox(height: 16),
-                      FilledButton(onPressed: _load, child: const Text('Повторить')),
+                      FilledButton(onPressed: _load, child: Text(s.retry)),
                     ],
                   )
                 : _chats.isEmpty
@@ -172,39 +206,70 @@ class _ChatsScreenState extends State<ChatsScreen> {
                         itemBuilder: (context, i) {
                           final chat = _chats[i];
                           final peer = chat.peer;
-                          final title = peer?.username ?? 'Чат #${chat.id}';
-                          final rawPreview = chat.lastMessage?.text ?? '';
-                          final sticker = StickerCodec.decode(rawPreview);
-                          final preview = sticker != null ? 'Стикер $sticker' : rawPreview;
-                          return ListTile(
-                            leading: CircleAvatar(
-                              backgroundColor:
-                                  AppleTheme.blue.withValues(alpha: 0.15),
-                              foregroundColor: AppleTheme.blue,
-                              child: Text(
-                                title.isNotEmpty ? title[0].toUpperCase() : '?',
-                              ),
+                          final title =
+                              peer?.username ?? s.chatFallbackTitle(chat.id);
+                          final preview = messagePreview(
+                            chat.lastMessage?.text ?? '',
+                            s,
+                          );
+                          final time = TimeFormat.chatListTime(
+                            chat.lastMessage?.createdAt,
+                            s,
+                          );
+                          return Dismissible(
+                            key: ValueKey('chat-${chat.id}'),
+                            direction: DismissDirection.endToStart,
+                            confirmDismiss: (_) => _confirmDelete(chat),
+                            background: Container(
+                              color: AppleTheme.red,
+                              alignment: Alignment.centerRight,
+                              padding: const EdgeInsets.only(right: 24),
+                              child: const Icon(Icons.delete, color: Colors.white),
                             ),
-                            title: Text(title),
-                            subtitle: Text(
-                              preview,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            onTap: peer == null
-                                ? null
-                                : () async {
-                                    await Navigator.of(context).push(
-                                      applePageRoute(
-                                        ChatScreen(
-                                          session: widget.session,
-                                          chatId: chat.id,
-                                          peer: peer,
-                                        ),
+                            child: ListTile(
+                              leading: UserAvatar(user: peer),
+                              title: Text(title),
+                              subtitle: preview.isEmpty
+                                  ? null
+                                  : Text(
+                                      preview,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                              trailing: time.isEmpty
+                                  ? null
+                                  : Text(
+                                      time,
+                                      style: const TextStyle(
+                                        fontSize: 13,
+                                        color: AppleTheme.secondaryLabel,
                                       ),
-                                    );
-                                    _load();
-                                  },
+                                    ),
+                              onTap: peer == null
+                                  ? null
+                                  : () async {
+                                      await Navigator.of(context).push(
+                                        applePageRoute(
+                                          ChatScreen(
+                                            session: widget.session,
+                                            chatId: chat.id,
+                                            peer: peer,
+                                          ),
+                                        ),
+                                      );
+                                      _load();
+                                    },
+                              onLongPress: peer == null
+                                  ? null
+                                  : () async {
+                                      final deleted = await _confirmDelete(chat);
+                                      if (deleted && mounted) {
+                                        setState(() {
+                                          _chats.removeAt(i);
+                                        });
+                                      }
+                                    },
+                            ),
                           );
                         },
                       ),
