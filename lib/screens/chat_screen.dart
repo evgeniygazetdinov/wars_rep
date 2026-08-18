@@ -1,14 +1,27 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../l10n/app_locale_scope.dart';
+import '../l10n/app_strings.dart';
 import '../models/chat_models.dart';
 import '../models/emoji_catalog.dart';
 import '../services/api_client.dart';
+import '../services/chat_socket.dart';
 import '../services/session_controller.dart';
 import '../theme/apple_theme.dart';
+import '../utils/time_format.dart';
 import '../widgets/emoji_sticker_panel.dart';
+import '../widgets/user_avatar.dart';
+
+class _FeedEntry {
+  const _FeedEntry.day(this.label) : message = null;
+  const _FeedEntry.message(this.message) : label = null;
+
+  final String? label;
+  final ChatMessage? message;
+}
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({
@@ -30,8 +43,12 @@ class _ChatScreenState extends State<ChatScreen> {
   final _textCtrl = TextEditingController();
   final _scroll = ScrollController();
   final _focus = FocusNode();
+
   List<ChatMessage> _messages = [];
-  Timer? _poll;
+  List<_FeedEntry> _feed = [];
+  ChatSocket? _socket;
+  StreamSubscription<SocketEvent>? _sub;
+
   bool _sending = false;
   String? _error;
   bool _showPanel = false;
@@ -40,66 +57,110 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
-    _refresh();
-    _poll = Timer.periodic(const Duration(seconds: 3), (_) => _refresh(silent: true));
+    _loadHistory();
+    _connectSocket();
     _focus.addListener(() {
-      if (_focus.hasFocus && _showPanel) {
-        setState(() => _showPanel = false);
-      }
+      if (_focus.hasFocus && _showPanel) setState(() => _showPanel = false);
     });
   }
 
   @override
   void dispose() {
-    _poll?.cancel();
+    _sub?.cancel();
+    _socket?.dispose();
     _textCtrl.dispose();
     _scroll.dispose();
     _focus.dispose();
     super.dispose();
   }
 
-  Future<void> _refresh({bool silent = false}) async {
+  // ────────────────────────── данные ──────────────────────────────────────── //
+
+  Future<void> _loadHistory() async {
     try {
       final msgs = await widget.session.api.allMessages(widget.chatId);
       if (!mounted) return;
-      final grew = msgs.length > _messages.length;
       setState(() {
         _messages = msgs;
-        _error = null;
+        _rebuildFeed();
       });
-      if (grew) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (_scroll.hasClients) {
-            _scroll.animateTo(
-              _scroll.position.maxScrollExtent,
-              duration: const Duration(milliseconds: 220),
-              curve: Curves.easeOut,
-            );
-          }
-        });
-      }
+      _scrollToBottom();
     } on ApiException catch (e) {
-      if (!silent && mounted) setState(() => _error = e.message);
-    } catch (e) {
-      if (!silent && mounted) setState(() => _error = e.toString());
+      if (mounted) setState(() => _error = e.message);
     }
   }
 
+  void _connectSocket() {
+    final token = widget.session.api.accessToken;
+    if (token == null) return;
+
+    final socket = ChatSocket(chatId: widget.chatId, accessToken: token);
+    _socket = socket;
+    socket.connect();
+
+    _sub = socket.stream.listen((event) {
+      if (!mounted) return;
+      if (event.type == SocketEventType.message && event.message != null) {
+        final msg = event.message!;
+        // Если сообщение уже есть (по id) — не добавлять повторно
+        if (_messages.any((m) => m.id == msg.id)) return;
+        setState(() {
+          _messages = [..._messages, msg];
+          _rebuildFeed();
+        });
+        _scrollToBottom();
+      }
+    });
+  }
+
+  void _rebuildFeed() {
+    final s = AppLocaleScope.of(context).strings;
+    _feed = _buildFeed(_messages, s);
+  }
+
+  static List<_FeedEntry> _buildFeed(List<ChatMessage> msgs, AppStrings s) {
+    final feed = <_FeedEntry>[];
+    DateTime? lastDay;
+    for (final m in msgs) {
+      final created = m.createdAt?.toLocal();
+      if (created != null) {
+        if (lastDay == null || !TimeFormat.isSameDay(lastDay, created)) {
+          feed.add(_FeedEntry.day(TimeFormat.daySeparator(created, s)));
+          lastDay = created;
+        }
+      }
+      feed.add(_FeedEntry.message(m));
+    }
+    return feed;
+  }
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scroll.hasClients) {
+        _scroll.animateTo(
+          _scroll.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  // ─────────────────────────── отправка ───────────────────────────────────── //
+
   Future<void> _sendText(String text) async {
-    final me = widget.session.user;
     final trimmed = text.trim();
-    if (trimmed.isEmpty || me == null || _sending) return;
+    if (trimmed.isEmpty || _sending) return;
+
     setState(() => _sending = true);
     try {
-      await widget.session.api.sendMessage(
-        chatId: widget.chatId,
-        userUid: me.uid,
-        text: trimmed,
-      );
-      await _refresh();
+      // Отправляем через REST (возвращает сохранённое сообщение);
+      // WS-событие придёт всем участникам от Redis.
+      await widget.session.api.sendMessage(chatId: widget.chatId, text: trimmed);
     } on ApiException catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
       }
     } finally {
       if (mounted) setState(() => _sending = false);
@@ -118,8 +179,8 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   void _insertEmoji(String emoji) {
-    final text = _textCtrl.text;
     final sel = _textCtrl.selection;
+    final text = _textCtrl.text;
     final start = sel.isValid ? sel.start : text.length;
     final end = sel.isValid ? sel.end : text.length;
     final next = text.replaceRange(start, end, emoji);
@@ -134,43 +195,164 @@ class _ChatScreenState extends State<ChatScreen> {
     setState(() => _showPanel = !_showPanel);
   }
 
+  // ───────────────────────── удаление сообщения ───────────────────────────── //
+
+  Future<void> _deleteMessage(ChatMessage m) async {
+    try {
+      final response = await widget.session.api.deleteMessage(
+        chatId: widget.chatId,
+        messageId: m.id,
+      );
+      if (response && mounted) {
+        setState(() {
+          _messages = _messages.where((x) => x.id != m.id).toList();
+          _rebuildFeed();
+        });
+      }
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    }
+  }
+
+  void _showMessageActions(BuildContext context, ChatMessage m, bool mine) {
+    final s = AppLocaleScope.of(context).strings;
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.copy_outlined),
+              title: Text(s.copyMessage),
+              onTap: () {
+                Clipboard.setData(ClipboardData(text: m.text));
+                Navigator.pop(ctx);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text(s.copiedToClipboard)),
+                );
+              },
+            ),
+            if (mine)
+              ListTile(
+                leading: const Icon(Icons.delete_outline, color: AppleTheme.red),
+                title: Text(s.deleteMessage,
+                    style: const TextStyle(color: AppleTheme.red)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _deleteMessage(m);
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ──────────────────────────── UI ────────────────────────────────────────── //
+
+  Widget _dayChip(String label) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Center(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+            decoration: BoxDecoration(
+              color: AppleTheme.secondaryGrouped,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontSize: 13,
+                color: AppleTheme.secondaryLabel,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ),
+      );
+
   Widget _bubble(ChatMessage m, bool mine) {
+    final s = AppLocaleScope.of(context).strings;
+    final time = TimeFormat.bubbleTime(m.createdAt);
     final sticker = StickerCodec.decode(m.text);
+
+    Widget content;
     if (sticker != null) {
-      return Align(
+      content = Align(
         alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
-          child: Text(sticker, style: const TextStyle(fontSize: 64)),
+          child: Column(
+            crossAxisAlignment:
+                mine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+            children: [
+              Text(sticker, style: const TextStyle(fontSize: 64)),
+              if (time.isNotEmpty)
+                Text(time,
+                    style: const TextStyle(
+                        fontSize: 11, color: AppleTheme.tertiaryLabel)),
+            ],
+          ),
+        ),
+      );
+    } else {
+      content = Align(
+        alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 3),
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
+          constraints:
+              BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.78),
+          decoration: BoxDecoration(
+            color: mine ? AppleTheme.blue : AppleTheme.secondaryGrouped,
+            borderRadius: BorderRadius.only(
+              topLeft: const Radius.circular(18),
+              topRight: const Radius.circular(18),
+              bottomLeft: Radius.circular(mine ? 18 : 4),
+              bottomRight: Radius.circular(mine ? 4 : 18),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  m.text,
+                  style: TextStyle(
+                    color: mine ? Colors.white : AppleTheme.primaryLabel,
+                    fontSize: 16,
+                    height: 1.3,
+                  ),
+                ),
+              ),
+              if (time.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  time,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: mine
+                        ? Colors.white.withValues(alpha: 0.75)
+                        : AppleTheme.tertiaryLabel,
+                  ),
+                ),
+              ],
+            ],
+          ),
         ),
       );
     }
 
-    return Align(
-      alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 3),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.sizeOf(context).width * 0.78,
-        ),
-        decoration: BoxDecoration(
-          color: mine ? AppleTheme.blue : AppleTheme.secondaryGrouped,
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(18),
-            topRight: const Radius.circular(18),
-            bottomLeft: Radius.circular(mine ? 18 : 4),
-            bottomRight: Radius.circular(mine ? 4 : 18),
-          ),
-        ),
-        child: Text(
-          m.text,
-          style: TextStyle(
-            color: mine ? Colors.white : AppleTheme.primaryLabel,
-            fontSize: 16,
-            height: 1.3,
-          ),
-        ),
+    return GestureDetector(
+      onLongPress: () => _showMessageActions(context, m, mine),
+      child: Tooltip(
+        message: mine ? s.longPressMessageHint : '',
+        child: content,
       ),
     );
   }
@@ -183,18 +365,28 @@ class _ChatScreenState extends State<ChatScreen> {
     return Scaffold(
       backgroundColor: AppleTheme.groupedBackground,
       appBar: AppBar(
-        title: Column(
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Text(widget.peer.username),
-            if (widget.peer.email != null)
-              Text(
-                widget.peer.email!,
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w400,
-                  color: AppleTheme.secondaryLabel,
-                ),
+            UserAvatar(user: widget.peer, radius: 16),
+            const SizedBox(width: 10),
+            Flexible(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(widget.peer.username, overflow: TextOverflow.ellipsis),
+                  if (widget.peer.email != null)
+                    Text(
+                      widget.peer.email!,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w400,
+                          color: AppleTheme.secondaryLabel),
+                    ),
+                ],
               ),
+            ),
           ],
         ),
       ),
@@ -205,7 +397,8 @@ class _ChatScreenState extends State<ChatScreen> {
               color: AppleTheme.red.withValues(alpha: 0.1),
               child: Padding(
                 padding: const EdgeInsets.all(8),
-                child: Text(_error!, style: const TextStyle(color: AppleTheme.red)),
+                child:
+                    Text(_error!, style: const TextStyle(color: AppleTheme.red)),
               ),
             ),
           Expanded(
@@ -216,12 +409,14 @@ class _ChatScreenState extends State<ChatScreen> {
               },
               child: ListView.builder(
                 controller: _scroll,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
-                itemCount: _messages.length,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                itemCount: _feed.length,
                 itemBuilder: (context, i) {
-                  final m = _messages[i];
-                  final mine = m.userUid == myUid;
-                  return _bubble(m, mine);
+                  final entry = _feed[i];
+                  if (entry.label != null) return _dayChip(entry.label!);
+                  final m = entry.message!;
+                  return _bubble(m, m.userUid == myUid);
                 },
               ),
             ),
@@ -236,7 +431,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   IconButton(
-                    tooltip: 'Смайлы и стикеры',
+                    tooltip: s.emojiPanelTooltip,
                     onPressed: _togglePanel,
                     icon: Icon(
                       _showPanel
@@ -265,9 +460,7 @@ class _ChatScreenState extends State<ChatScreen> {
                           borderSide: BorderSide.none,
                         ),
                         contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 10,
-                        ),
+                            horizontal: 16, vertical: 10),
                       ),
                     ),
                   ),
@@ -278,7 +471,8 @@ class _ChatScreenState extends State<ChatScreen> {
                         ? const SizedBox(
                             width: 18,
                             height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
+                            child:
+                                CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Icon(Icons.arrow_upward),
                   ),
